@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>แอปจดค่าไฟส่วนตัว</title>
+    <!-- Tailwind CSS สำหรับตกแต่งหน้าตาให้สวยงาม -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-50 min-h-screen p-4">
+    <div class="max-w-md mx-auto bg-white rounded-2xl shadow-md p-6 mt-4">
+        <h1 class="text-2xl font-bold text-slate-800 mb-6 text-center">⚡ บันทึกมิเตอร์ค่าไฟ</h1>
+        
+        <!-- ฟอร์มกรอกข้อมูล -->
+        <form id="electricForm" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-slate-600 mb-1">วันที่จดมิเตอร์</label>
+                <input type="date" id="recordDate" required class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600 mb-1">เลขมิเตอร์ที่อ่านได้ (Unit)</label>
+                <input type="number" step="any" id="meterUnit" placeholder="เช่น 15420" required class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600 mb-1">ราคาค่าไฟโดยประมาณ (บาท/หน่วย เช่น 4.5)</label>
+                <input type="number" step="any" id="unitRate" value="4.5" required class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+            <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700 transition">บันทึกข้อมูล</button>
+        </form>
+
+        <!-- ประวัติการบันทึก -->
+        <div class="mt-8">
+            <h2 class="text-lg font-bold text-slate-800 mb-3">📜 ประวัติการจด</h2>
+            <div id="logList" class="space-y-3 max-h-60 overflow-y-auto">
+                <!-- ข้อมูลจะถูกดึงมาแสดงตรงนี้ -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ใส่ค่าที่ก๊อปปี้มาจาก Supabase Project Settings -> API
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+        
+        const { createClient } = supabase;
+        const _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // กำหนดวันที่ปัจจุบันให้ช่องinputอัตโนมัติ
+        document.getElementById('recordDate').valueAsDate = new Date();
+
+        const form = document.getElementById('electricForm');
+        const logList = document.getElementById('logList');
+
+        // ฟังก์ชันดึงข้อมูลมาแสดง
+        async function fetchLogs() {
+            const { data, error } = await _supabase
+                .from('electricity_logs')
+                .select('*')
+                .order('recorded_date', { ascending: false });
+
+            if (error) {
+                console.error('Error fetching:', error);
+                return;
+            }
+
+            logList.innerHTML = '';
+            if (data.length === 0) {
+                logList.innerHTML = '<p class="text-slate-400 text-center text-sm">ยังไม่มีข้อมูลการบันทึก</p>';
+                return;
+            }
+
+            data.forEach((log, index) => {
+                // คำนวณหาหน่วยที่ใช้เทียบกับแถวก่อนหน้า (ถ้ามี)
+                logList.innerHTML += `
+                    <div class="bg-slate-50 p-3 rounded-lg border border-slate-100 flex justify-between items-center">
+                        <div>
+                            <p class="text-sm font-semibold text-slate-700">📅 ${log.recorded_date}</p>
+                            <p class="text-xs text-slate-500">มิเตอร์: ${log.meter_unit} | ใช้ไป: ${log.unit_used || 0} หน่วย</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-sm font-bold text-blue-600">฿${log.total_price || 0}</p>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        // ฟังก์ชันกดบันทึกข้อมูล
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const recorded_date = document.getElementById('recordDate').value;
+            const meter_unit = parseFloat(document.getElementById('meterUnit').value);
+            const unitRate = parseFloat(document.getElementById('unitRate').value);
+
+            // ดึงข้อมูลล่าสุดมาก่อน เพื่อเอาไว้คำนวณหน่วยที่ใช้
+            const { data: lastData } = await _supabase
+                .from('electricity_logs')
+                .select('meter_unit')
+                .order('recorded_date', { ascending: false })
+                .limit(1);
+
+            let unit_used = 0;
+            if (lastData && lastData.length > 0) {
+                unit_used = meter_unit - lastData[0].meter_unit;
+                if (unit_used < 0) unit_used = 0; // ป้องกันกรณีเลขมิเตอร์น้อยกว่าเดือนก่อน
+            }
+
+            const total_price = unit_used * unitRate;
+
+            // บันทึกลง Supabase
+            const { error } = await _supabase.from('electricity_logs').insert([
+                { recorded_date, meter_unit, unit_used, total_price }
+            ]);
+
+            if (error) {
+                alert('เกิดข้อผิดพลาดในการบันทึก: ' + error.message);
+            } else {
+                alert('บันทึกสำเร็จ!');
+                form.reset();
+                document.getElementById('recordDate').valueAsDate = new Date();
+                fetchLogs();
+            }
+        });
+
+        // โหลดข้อมูลเมื่อเปิดหน้าเว็บ
+        fetchLogs();
+    </script>
+</body>
+</html>
