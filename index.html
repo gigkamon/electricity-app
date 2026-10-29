@@ -40,6 +40,14 @@
             </div>
         </form>
 
+        <!-- ส่วนแสดงสรุปยอดรวมรายปี -->
+        <div class="mt-8">
+            <h2 class="text-lg font-bold text-slate-800 mb-3">📅 สรุปยอดรวมรายปี</h2>
+            <div id="yearlySummaryList" class="space-y-2">
+                <!-- ข้อมูลสรุปรายปีจะแสดงตรงนี้ -->
+            </div>
+        </div>
+
         <!-- ส่วนแสดงกราฟการใช้ไฟฟ้า -->
         <div class="mt-8">
             <h2 class="text-lg font-bold text-slate-800 mb-3">📊 กราฟแสดงหน่วยที่ใช้ (รายเดือน)</h2>
@@ -66,13 +74,13 @@
 
         document.getElementById('recordDate').valueAsDate = new Date();
 
-        // ฟังก์ชันกดปุ่มลัดเลือกวันปัจจุบัน
         window.setToday = function() {
             document.getElementById('recordDate').valueAsDate = new Date();
         }
 
         const form = document.getElementById('electricForm');
         const logList = document.getElementById('logList');
+        const yearlySummaryList = document.getElementById('yearlySummaryList');
         const meterUnitInput = document.getElementById('meterUnit');
         const unitRateInput = document.getElementById('unitRate');
         const editIdInput = document.getElementById('editId');
@@ -106,6 +114,7 @@
             const monthNames = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
             return {
                 key: `${year}-${String(month + 1).padStart(2, '0')}`,
+                yearNum: year + 543,
                 text: `${monthNames[month]} ${year + 543}`
             };
         }
@@ -155,15 +164,22 @@
             }
 
             logList.innerHTML = '';
+            yearlySummaryList.innerHTML = '';
+
             if (data.length === 0) {
                 logList.innerHTML = '<p class="text-slate-400 text-center text-sm">ยังไม่มีข้อมูลการบันทึก</p>';
+                yearlySummaryList.innerHTML = '<p class="text-slate-400 text-center text-sm">ยังไม่มีข้อมูลสรุปรายปี</p>';
                 renderChart([], []);
                 return;
             }
 
             const grouped = {};
+            const yearlyGroup = {};
+
             data.forEach(log => {
                 const cycle = getBillingCycle(log.recorded_date);
+                
+                // จัดกลุ่มรายเดือน
                 if (!grouped[cycle.key]) {
                     grouped[cycle.key] = {
                         title: `รอบบิล ${cycle.text}`,
@@ -176,6 +192,33 @@
                 grouped[cycle.key].logs.push(log);
                 grouped[cycle.key].totalUnit += (log.unit_used || 0);
                 grouped[cycle.key].totalPrice += (log.total_price || 0);
+
+                // จัดกลุ่มรายปี (อ้างอิงตาม พ.ศ. ของรอบบิล)
+                const yKey = cycle.yearNum;
+                if (!yearlyGroup[yKey]) {
+                    yearlyGroup[yKey] = {
+                        totalUnit: 0,
+                        totalPrice: 0
+                    };
+                }
+                yearlyGroup[yKey].totalUnit += (log.unit_used || 0);
+                yearlyGroup[yKey].totalPrice += (log.total_price || 0);
+            });
+
+            // แสดงผลสรุปรายปี
+            Object.keys(yearlyGroup).sort().reverse().forEach(yKey => {
+                const yData = yearlyGroup[yKey];
+                yearlySummaryList.innerHTML += `
+                    <div class="bg-blue-50 border border-blue-100 p-3 rounded-xl flex justify-between items-center">
+                        <div>
+                            <p class="text-sm font-bold text-blue-900">🗓️ ปี พ.ศ. ${yKey}</p>
+                            <p class="text-xs text-blue-700">รวมใช้ทั้งปี: <span class="font-semibold">${yData.totalUnit} หน่วย</span></p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-sm font-bold text-emerald-600">฿${yData.totalPrice.toFixed(2)}</p>
+                        </div>
+                    </div>
+                `;
             });
 
             const sortedKeys = Object.keys(grouped).sort();
@@ -257,7 +300,7 @@
         window.deleteLog = async function(id) {
             if (!confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) return;
 
-            const { error} = await _supabase
+            const { error } = await _supabase
                 .from('electricity_logs')
                 .delete()
                 .eq('id', id);
@@ -293,7 +336,7 @@
                 if (unit_used < 0) unit_used = 0;
                 const total_price = unit_used * unitRate;
 
-                const { error } = await_supabase
+                const { error } = await _supabase
                     .from('electricity_logs')
                     .update({ recorded_date, meter_unit, unit_used, total_price, unit_rate: unitRate })
                     .eq('id', editId);
