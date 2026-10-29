@@ -191,8 +191,9 @@
                     `;
                 });
 
+                // เอาคำว่า open ออก เพื่อให้มันพับปิดไว้เป็นค่าเริ่มต้น
                 logList.innerHTML += `
-                    <details class="group bg-slate-50 rounded-xl border border-slate-200 overflow-hidden transition" open>
+                    <details class="group bg-slate-50 rounded-xl border border-slate-200 overflow-hidden transition">
                         <summary class="p-4 cursor-pointer select-none flex justify-between items-center hover:bg-slate-100">
                             <div>
                                 <p class="text-sm font-bold text-slate-700">📌 ${group.title}</p>
@@ -214,7 +215,6 @@
             });
         }
 
-        // ฟังก์ชันเตรียมข้อมูลใส่ฟอร์มเพื่อแก้ไข
         window.editLog = function(id, date, meter, rate) {
             editIdInput.value = id;
             document.getElementById('recordDate').value = date;
@@ -227,7 +227,6 @@
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        // ฟังก์ชันล้างฟอร์มกลับเป็นโหมดปกติ
         window.resetForm = function() {
             editIdInput.value = '';
             form.reset();
@@ -238,7 +237,6 @@
             fetchLogs();
         }
 
-        // ฟังก์ชันลบข้อมูล
         window.deleteLog = async function(id) {
             if (!confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) return;
 
@@ -255,7 +253,6 @@
             }
         }
 
-        // ฟังก์ชันกดบันทึกหรืออัปเดตข้อมูล
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const editId = editIdInput.value;
@@ -263,20 +260,18 @@
             const meter_unit = parseFloat(meterUnitInput.value);
             const unitRate = parseFloat(unitRateInput.value);
 
-            // ดึงข้อมูลทั้งหมดมาคำนวณหน่วยที่ใช้ใหม่ตามลำดับเวลา
             const { data: allData } = await _supabase
                 .from('electricity_logs')
                 .select('*')
                 .order('recorded_date', { ascending: true });
 
             if (editId) {
-                // โหมดแก้ไข: คำนวณหน่วยที่ใช้ใหม่เทียบกับแถวก่อนหน้าของรายการที่จะแก้
                 const index = allData.findIndex(item => item.id == editId);
                 let unit_used = 0;
                 if (index > 0) {
                     unit_used = meter_unit - allData[index - 1].meter_unit;
                 } else {
-                    unit_used = 0; // ถ้าเป็นรายการแรกสุด
+                    unit_used = 0;
                 }
                 if (unit_used < 0) unit_used = 0;
                 const total_price = unit_used * unitRate;
@@ -293,7 +288,6 @@
                     resetForm();
                 }
             } else {
-                // โหมดเพิ่มใหม่
                 const lastItem = allData && allData.length > 0 ? allData[allData.length - 1] : null;
                 let unit_used = 0;
                 if (lastItem) {
