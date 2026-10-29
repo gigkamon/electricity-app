@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>แอปจดค่าไฟส่วนตัว (สรุปรายเดือน)</title>
+    <title>แอปจดค่าไฟส่วนตัว (จำค่าล่าสุด)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <!-- Supabase JS Client -->
@@ -22,7 +22,7 @@
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-600 mb-1">เลขมิเตอร์ที่อ่านได้ (Unit)</label>
-                <input type="number" step="any" id="meterUnit" placeholder="เช่น 15420" required class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                <input type="number" step="any" id="meterUnit" placeholder="กำลังโหลดข้อมูลล่าสุด..." required class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
             </div>
             <div>
                 <label class="block text-sm font-medium text-slate-600 mb-1">ราคาค่าไฟต่อหน่วย (บาท)</label>
@@ -51,6 +51,8 @@
 
         const form = document.getElementById('electricForm');
         const logList = document.getElementById('logList');
+        const meterUnitInput = document.getElementById('meterUnit');
+        const unitRateInput = document.getElementById('unitRate');
 
         // ฟังก์ชันคำนวณรอบบิล (ตัดรอบวันที่ 25)
         function getBillingCycle(dateString) {
@@ -73,7 +75,7 @@
             };
         }
 
-        // ดึงข้อมูลและจัดกลุ่มตามรอบบิล
+        // ดึงข้อมูลและจัดกลุ่มตามรอบบิล พร้อมดึงค่าล่าสุดมาเติมฟอร์ม
         async function fetchLogs() {
             const { data, error } = await _supabase
                 .from('electricity_logs')
@@ -85,13 +87,24 @@
                 return;
             }
 
+            // ถ้ามีข้อมูล ให้ดึงรายการล่าสุดมาเติมช่องกรอก
+            if (data && data.length > 0) {
+                meterUnitInput.placeholder = `ครั้งล่าสุด: ${data[0].meter_unit}`;
+                // ถ้าเคยบันทึกเรทราคาไว้ด้วย สามารถดึงมาจำได้ (หรือใช้ค่าล่าสุดที่กรอก)
+                if (data[0].unit_rate) {
+                    unitRateInput.value = data[0].unit_rate;
+                }
+            } else {
+                meterUnitInput.placeholder = 'เช่น 15420';
+            }
+
             logList.innerHTML = '';
             if (data.length === 0) {
                 logList.innerHTML = '<p class="text-slate-400 text-center text-sm">ยังไม่มีข้อมูลการบันทึก</p>';
                 return;
             }
 
-            // จัดกลุ่มข้อมูลตามรอบบิล (Group By Cycle Key)
+            // จัดกลุ่มข้อมูลตามรอบบิล
             const grouped = {};
             data.forEach(log => {
                 const cycle = getBillingCycle(log.recorded_date);
@@ -108,11 +121,10 @@
                 grouped[cycle.key].totalPrice += (log.total_price || 0);
             });
 
-            // วนลูปสร้าง UI เป็นการ์ดแต่ละเดือน
+            // วนลูปสร้าง UI การ์ดรายเดือน
             Object.keys(grouped).sort().reverse().forEach(key => {
                 const group = grouped[key];
                 
-                // สร้าง HTML สำหรับรายการย่อยข้างใน
                 let innerLogsHtml = '';
                 group.logs.forEach(item => {
                     innerLogsHtml += `
@@ -123,7 +135,6 @@
                     `;
                 });
 
-                // สร้างการ์ดหลักแบบกดคลิกพับ/กางได้ (ใช้ tag <details>)
                 logList.innerHTML += `
                     <details class="group bg-slate-50 rounded-xl border border-slate-200 overflow-hidden transition">
                         <summary class="p-4 cursor-pointer select-none flex justify-between items-center hover:bg-slate-100">
@@ -151,8 +162,8 @@
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const recorded_date = document.getElementById('recordDate').value;
-            const meter_unit = parseFloat(document.getElementById('meterUnit').value);
-            const unitRate = parseFloat(document.getElementById('unitRate').value);
+            const meter_unit = parseFloat(meterUnitInput.value);
+            const unitRate = parseFloat(unitRateInput.value);
 
             const { data: lastData } = await _supabase
                 .from('electricity_logs')
@@ -168,8 +179,9 @@
 
             const total_price = unit_used * unitRate;
 
+            // บันทึกข้อมูลลงฐานข้อมูล (รวมถึงเรทราคาปัจจุบันด้วย)
             const { error } = await _supabase.from('electricity_logs').insert([
-                { recorded_date, meter_unit, unit_used, total_price }
+                { recorded_date, meter_unit, unit_used, total_price, unit_rate: unitRate }
             ]);
 
             if (error) {
