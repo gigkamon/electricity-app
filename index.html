@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>แอปจดค่าไฟส่วนตัว (พร้อมกราฟสรุป)</title>
+    <title>แอปจดค่าไฟส่วนตัว</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <!-- Supabase JS Client -->
@@ -18,6 +18,7 @@
         
         <!-- ฟอร์มกรอกข้อมูล -->
         <form id="electricForm" class="space-y-4">
+            <input type="hidden" id="editId">
             <div>
                 <label class="block text-sm font-medium text-slate-600 mb-1">วันที่จดมิเตอร์จริง</label>
                 <input type="date" id="recordDate" required class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
@@ -30,7 +31,10 @@
                 <label class="block text-sm font-medium text-slate-600 mb-1">ราคาค่าไฟต่อหน่วย (บาท)</label>
                 <input type="number" step="any" id="unitRate" value="4.5" required class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
             </div>
-            <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700 transition">บันทึกข้อมูล</button>
+            <div class="flex gap-2">
+                <button type="submit" id="submitBtn" class="flex-1 bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700 transition">บันทึกข้อมูล</button>
+                <button type="button" id="cancelEditBtn" onclick="resetForm()" class="hidden bg-slate-300 text-slate-700 px-4 py-2 rounded-lg font-semibold hover:bg-slate-400 transition">ยกเลิก</button>
+            </div>
         </form>
 
         <!-- ส่วนแสดงกราฟการใช้ไฟฟ้า -->
@@ -63,14 +67,16 @@
         const logList = document.getElementById('logList');
         const meterUnitInput = document.getElementById('meterUnit');
         const unitRateInput = document.getElementById('unitRate');
+        const editIdInput = document.getElementById('editId');
+        const submitBtn = document.getElementById('submitBtn');
+        const cancelEditBtn = document.getElementById('cancelEditBtn');
         
         let electricChart = null;
 
-        // ฟังก์ชันคำนวณรอบบิล (ตัดรอบวันที่ 25)
         function getBillingCycle(dateString) {
             const date = new Date(dateString);
             let day = date.getDate();
-            let month = date.getMonth(); // 0-11
+            let month = date.getMonth(); 
             let year = date.getFullYear();
 
             if (day > 25) {
@@ -87,13 +93,9 @@
             };
         }
 
-        // ฟังก์ชันสร้างหรืออัปเดตกราฟ
         function renderChart(chartLabels, chartData) {
             const ctx = document.getElementById('electricChart').getContext('2d');
-            
-            if (electricChart) {
-                electricChart.destroy();
-            }
+            if (electricChart) electricChart.destroy();
 
             electricChart = new Chart(ctx, {
                 type: 'bar',
@@ -110,33 +112,28 @@
                 },
                 options: {
                     responsive: true,
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
-                    }
+                    scales: { y: { beginAtZero: true } }
                 }
             });
         }
 
-        // ดึงข้อมูลและจัดกลุ่มตามรอบบิล พร้อมอัปเดตกราฟและฟอร์ม
         async function fetchLogs() {
             const { data, error } = await _supabase
                 .from('electricity_logs')
                 .select('*')
-                .order('recorded_date', { ascending: true }); // เรียงจากเก่าไปใหม่สำหรับทำกราฟ
+                .order('recorded_date', { ascending: true });
 
             if (error) {
                 console.error('Error fetching:', error);
                 return;
             }
 
-            if (data && data.length > 0) {
+            if (data && data.length > 0 && !editIdInput.value) {
                 meterUnitInput.placeholder = `ครั้งล่าสุด: ${data[data.length - 1].meter_unit}`;
                 if (data[data.length - 1].unit_rate) {
                     unitRateInput.value = data[data.length - 1].unit_rate;
                 }
-            } else {
+            } else if (!editIdInput.value) {
                 meterUnitInput.placeholder = 'เช่น 15420';
             }
 
@@ -147,7 +144,6 @@
                 return;
             }
 
-            // จัดกลุ่มข้อมูลตามรอบบิล
             const grouped = {};
             data.forEach(log => {
                 const cycle = getBillingCycle(log.recorded_date);
@@ -165,7 +161,6 @@
                 grouped[cycle.key].totalPrice += (log.total_price || 0);
             });
 
-            // เตรียมข้อมูลสำหรับใส่กราฟ (เรียงตาม Key จากอดีต -> ปัจจุบัน)
             const sortedKeys = Object.keys(grouped).sort();
             const chartLabels = [];
             const chartData = [];
@@ -177,22 +172,27 @@
 
             renderChart(chartLabels, chartData);
 
-            // วนลูปสร้าง UI การ์ดรายเดือน (แสดงล่าสุดไว้บนสุด เลยใช้ reverse())
             sortedKeys.reverse().forEach(key => {
                 const group = grouped[key];
-                
                 let innerLogsHtml = '';
+                
                 group.logs.forEach(item => {
                     innerLogsHtml += `
-                        <div class="flex justify-between items-center text-xs text-slate-600 bg-white p-2 rounded border border-slate-100">
-                            <span>📅 จดวันที่: ${item.recorded_date} (มิเตอร์: ${item.meter_unit})</span>
-                            <span class="font-medium text-slate-700">ใช้: ${item.unit_used || 0} หน่วย (฿${(item.total_price || 0).toFixed(2)})</span>
+                        <div class="flex justify-between items-center text-xs text-slate-600 bg-white p-2.5 rounded border border-slate-100 gap-2">
+                            <div>
+                                <span class="font-semibold text-slate-700">📅 ${item.recorded_date}</span>
+                                <span class="text-slate-500 block">มิเตอร์: ${item.meter_unit} | ใช้: ${item.unit_used || 0} หน่วย (฿${(item.total_price || 0).toFixed(2)})</span>
+                            </div>
+                            <div class="flex gap-1 shrink-0">
+                                <button onclick="editLog(${item.id}, '${item.recorded_date}', ${item.meter_unit}, ${item.unit_rate || 4.5})" class="bg-amber-100 text-amber-700 px-2 py-1 rounded hover:bg-amber-200 transition">แก้ไข</button>
+                                <button onclick="deleteLog(${item.id})" class="bg-rose-100 text-rose-700 px-2 py-1 rounded hover:bg-rose-200 transition">ลบ</button>
+                            </div>
                         </div>
                     `;
                 });
 
                 logList.innerHTML += `
-                    <details class="group bg-slate-50 rounded-xl border border-slate-200 overflow-hidden transition">
+                    <details class="group bg-slate-50 rounded-xl border border-slate-200 overflow-hidden transition" open>
                         <summary class="p-4 cursor-pointer select-none flex justify-between items-center hover:bg-slate-100">
                             <div>
                                 <p class="text-sm font-bold text-slate-700">📌 ${group.title}</p>
@@ -214,38 +214,106 @@
             });
         }
 
-        // ฟังก์ชันกดบันทึกข้อมูล
+        // ฟังก์ชันเตรียมข้อมูลใส่ฟอร์มเพื่อแก้ไข
+        window.editLog = function(id, date, meter, rate) {
+            editIdInput.value = id;
+            document.getElementById('recordDate').value = date;
+            meterUnitInput.value = meter;
+            unitRateInput.value = rate;
+            
+            submitBtn.textContent = 'อัปเดตข้อมูล';
+            submitBtn.className = 'flex-1 bg-amber-600 text-white py-2 rounded-lg font-semibold hover:bg-amber-700 transition';
+            cancelEditBtn.classList.remove('hidden');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // ฟังก์ชันล้างฟอร์มกลับเป็นโหมดปกติ
+        window.resetForm = function() {
+            editIdInput.value = '';
+            form.reset();
+            document.getElementById('recordDate').valueAsDate = new Date();
+            submitBtn.textContent = 'บันทึกข้อมูล';
+            submitBtn.className = 'flex-1 bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700 transition';
+            cancelEditBtn.classList.add('hidden');
+            fetchLogs();
+        }
+
+        // ฟังก์ชันลบข้อมูล
+        window.deleteLog = async function(id) {
+            if (!confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) return;
+
+            const { error } = await _supabase
+                .from('electricity_logs')
+                .delete()
+                .eq('id', id);
+
+            if (error) {
+                alert('เกิดข้อผิดพลาดในการลบ: ' + error.message);
+            } else {
+                alert('ลบข้อมูลเรียบร้อยแล้ว');
+                fetchLogs();
+            }
+        }
+
+        // ฟังก์ชันกดบันทึกหรืออัปเดตข้อมูล
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
+            const editId = editIdInput.value;
             const recorded_date = document.getElementById('recordDate').value;
             const meter_unit = parseFloat(meterUnitInput.value);
             const unitRate = parseFloat(unitRateInput.value);
 
-            const { data: lastData } = await _supabase
+            // ดึงข้อมูลทั้งหมดมาคำนวณหน่วยที่ใช้ใหม่ตามลำดับเวลา
+            const { data: allData } = await _supabase
                 .from('electricity_logs')
-                .select('meter_unit')
-                .order('recorded_date', { ascending: false })
-                .limit(1);
+                .select('*')
+                .order('recorded_date', { ascending: true });
 
-            let unit_used = 0;
-            if (lastData && lastData.length > 0) {
-                unit_used = meter_unit - lastData[0].meter_unit;
+            if (editId) {
+                // โหมดแก้ไข: คำนวณหน่วยที่ใช้ใหม่เทียบกับแถวก่อนหน้าของรายการที่จะแก้
+                const index = allData.findIndex(item => item.id == editId);
+                let unit_used = 0;
+                if (index > 0) {
+                    unit_used = meter_unit - allData[index - 1].meter_unit;
+                } else {
+                    unit_used = 0; // ถ้าเป็นรายการแรกสุด
+                }
                 if (unit_used < 0) unit_used = 0;
-            }
+                const total_price = unit_used * unitRate;
 
-            const total_price = unit_used * unitRate;
+                const { error } = await _supabase
+                    .from('electricity_logs')
+                    .update({ recorded_date, meter_unit, unit_used, total_price, unit_rate: unitRate })
+                    .eq('id', editId);
 
-            const { error } = await _supabase.from('electricity_logs').insert([
-                { recorded_date, meter_unit, unit_used, total_price, unit_rate: unitRate }
-            ]);
-
-            if (error) {
-                alert('เกิดข้อผิดพลาดในการบันทึก: ' + error.message);
+                if (error) {
+                    alert('เกิดข้อผิดพลาดในการอัปเดต: ' + error.message);
+                } else {
+                    alert('อัปเดตข้อมูลสำเร็จ!');
+                    resetForm();
+                }
             } else {
-                alert('บันทึกสำเร็จ!');
-                form.reset();
-                document.getElementById('recordDate').valueAsDate = new Date();
-                fetchLogs();
+                // โหมดเพิ่มใหม่
+                const lastItem = allData && allData.length > 0 ? allData[allData.length - 1] : null;
+                let unit_used = 0;
+                if (lastItem) {
+                    unit_used = meter_unit - lastItem.meter_unit;
+                    if (unit_used < 0) unit_used = 0;
+                }
+                const total_price = unit_used * unitRate;
+
+                const { error } = await _supabase.from('electricity_logs').insert([
+                    { recorded_date, meter_unit, unit_used, total_price, unit_rate: unitRate }
+                ]);
+
+                if (error) {
+                    alert('เกิดข้อผิดพลาดในการบันทึก: ' + error.message);
+                } else {
+                    alert('บันทึกสำเร็จ!');
+                    form.reset();
+                    document.getElementById('recordDate').valueAsDate = new Date();
+                    fetchLogs();
+                }
             }
         });
 
