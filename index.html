@@ -176,7 +176,8 @@
                 const group = grouped[key];
                 let innerLogsHtml = '';
                 
-                group.logs.forEach(item => {
+                // เรียงประวัติข้างในให้วันล่าสุดอยู่บนสุด (ใช้ reverse บนอาเรย์ของ logs ในเดือนนั้น)
+                group.logs.sort((a, b) => new Date(b.recorded_date) - new Date(a.recorded_date)).forEach(item => {
                     innerLogsHtml += `
                         <div class="flex justify-between items-center text-xs text-slate-600 bg-white p-2.5 rounded border border-slate-100 gap-2">
                             <div>
@@ -191,7 +192,6 @@
                     `;
                 });
 
-                // เอาคำว่า open ออก เพื่อให้มันพับปิดไว้เป็นค่าเริ่มต้น
                 logList.innerHTML += `
                     <details class="group bg-slate-50 rounded-xl border border-slate-200 overflow-hidden transition">
                         <summary class="p-4 cursor-pointer select-none flex justify-between items-center hover:bg-slate-100">
